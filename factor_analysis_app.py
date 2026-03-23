@@ -5,10 +5,48 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from factor_analyzer import FactorAnalyzer
 import io
 import warnings
 warnings.filterwarnings("ignore")
+
+
+def varimax(loadings, max_iter=1000, tol=1e-6):
+    """Pure numpy varimax rotation — no external dependencies."""
+    A = loadings.copy()
+    n, k = A.shape
+    R = np.eye(k)
+    for _ in range(max_iter):
+        old_R = R.copy()
+        for i in range(k):
+            for j in range(i + 1, k):
+                x = A[:, i]
+                y = A[:, j]
+                u = x**2 - y**2
+                v = 2 * x * y
+                A_val = np.sum(u)
+                B_val = np.sum(v)
+                C_val = np.sum(u**2 - v**2)
+                D_val = 2 * np.sum(u * v)
+                num = D_val - 2 * A_val * B_val / n
+                den = C_val - (A_val**2 - B_val**2) / n
+                theta = 0.25 * np.arctan2(num, den)
+                c, s = np.cos(theta), np.sin(theta)
+                rot = np.array([[c, -s], [s, c]])
+                A[:, [i, j]] = A[:, [i, j]] @ rot
+                R[:, [i, j]] = R[:, [i, j]] @ rot
+        if np.max(np.abs(R - old_R)) < tol:
+            break
+    return A, R
+
+
+def get_factor_loadings(df_scaled, n_factors):
+    """PCA + varimax rotation. Returns loadings (n_vars x n_factors) and scores."""
+    pca = PCA(n_components=n_factors)
+    pca.fit(df_scaled)
+    init_loadings = pca.components_.T * np.sqrt(pca.explained_variance_)
+    rotated_loadings, _ = varimax(init_loadings)
+    scores = df_scaled @ np.linalg.pinv(rotated_loadings).T
+    return rotated_loadings, scores
 
 # ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -289,14 +327,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 try:
-    fa = FactorAnalyzer(n_factors=n_factors, rotation='varimax')
-    fa.fit(df_scaled)
+    rotated_loadings, factor_scores_matrix = get_factor_loadings(df_scaled, n_factors)
 except Exception as e:
     st.error(f"Factor analysis failed: {e}\n\nTry reducing the number of factors or checking your data for constant columns.")
     st.stop()
-loadings = fa.loadings_
+
 loadings_df = pd.DataFrame(
-    loadings,
+    rotated_loadings,
     index=final_cols,
     columns=[f"Factor {i+1}" for i in range(n_factors)]
 )
@@ -350,7 +387,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-factor_scores = fa.transform(df_scaled)
+factor_scores = factor_scores_matrix
 scores_df = pd.DataFrame(factor_scores, columns=factor_names)
 
 id_cols = [c for c in ['uuid', 'record', 'id', 'ID', 'ResponseId'] if c in df_raw.columns]
