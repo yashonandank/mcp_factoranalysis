@@ -207,10 +207,17 @@ st.markdown("""
 
 drop_cols = st.multiselect("Columns to drop", options=selected_cols, default=[])
 final_cols = [c for c in selected_cols if c not in drop_cols]
-df_final = df_work[final_cols]
 
 if len(final_cols) < 3:
     st.warning("⚠️ You need at least 3 columns after dropping. Please adjust your selection.")
+    st.stop()
+
+# Re-dropna after column changes, then replace any remaining inf values
+df_final = df_raw[final_cols].dropna()
+df_final = df_final.replace([np.inf, -np.inf], np.nan).dropna()
+
+if len(df_final) < 10:
+    st.error("Not enough complete rows to run factor analysis after cleaning. Check your data.")
     st.stop()
 
 # ── STEP 3: Scree Plot ────────────────────────────────────────────────────────
@@ -241,6 +248,7 @@ ax.legend(fontsize=9)
 ax.grid(axis='y', alpha=0.3, zorder=0)
 ax.spines[['top', 'right']].set_visible(False)
 ax.spines[['left', 'bottom']].set_color('#ccc')
+ax.set_xticks(range(1, len(eigenvalues) + 1))
 ax.tick_params(colors='#555')
 plt.tight_layout()
 st.pyplot(fig_scree)
@@ -280,8 +288,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-fa = FactorAnalyzer(n_factors=n_factors, rotation='varimax')
-fa.fit(df_scaled)
+try:
+    fa = FactorAnalyzer(n_factors=n_factors, rotation='varimax')
+    fa.fit(df_scaled)
+except Exception as e:
+    st.error(f"Factor analysis failed: {e}\n\nTry reducing the number of factors or checking your data for constant columns.")
+    st.stop()
 loadings = fa.loadings_
 loadings_df = pd.DataFrame(
     loadings,
